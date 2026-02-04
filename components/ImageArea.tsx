@@ -1,147 +1,84 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
+import { VocabMap } from '../types';
+import { detectNumberPositions } from '../services/geminiService';
 
 interface ImageAreaProps {
+  vocabData: VocabMap;
+  imageSrc: string | null;
+  positions: Record<string, { x: number, y: number }>;
+  onUpdatePositions: (positions: Record<string, { x: number, y: number }>) => void;
   currentHint?: string;
   onGuess: (id: string) => void;
   gameState: {
     correctId: string | null;
+    wrongId: string | null;
     hintId: string | null;
     disabled: boolean;
     status: string;
   };
 }
 
-interface ButtonPosition {
-  x: number; // Percentage 0-100
-  y: number; // Percentage 0-100
-}
-
-// Preset positions corresponding to the "Airport/Travel" scene analysis
-const SCENE_POSITIONS: Record<string, ButtonPosition> = {
-  "1": { x: 8, y: 38 },   // agency (Left office)
-  "2": { x: 14, y: 45 },  // agent (Woman at counter)
-  "3": { x: 28, y: 58 },  // brochure (Girl reading map)
-  "4": { x: 12, y: 18 },  // domestic tourism (Sign top left)
-  "5": { x: 18, y: 52 },  // estimate (Paper on desk)
-  "6": { x: 82, y: 15 },  // fixed (Sign schedule)
-  "7": { x: 68, y: 55 },  // food tourism (Girl with noodles)
-  "8": { x: 30, y: 25 },  // graveyard (Poster)
-  "9": { x: 58, y: 48 },  // holidaymaker (Man green shirt)
-  "10": { x: 48, y: 68 }, // homestay (Kiosk machine)
-  "11": { x: 88, y: 35 }, // hop-on hop-off (Bus)
-  "12": { x: 92, y: 65 }, // hunt (Man searching in back)
-  "13": { x: 75, y: 12 }, // itinerary (Sign)
-  "14": { x: 38, y: 25 }, // loft (Poster)
-  "15": { x: 46, y: 25 }, // low season (Poster)
-  "16": { x: 48, y: 60 }, // online app (Screen on Kiosk)
-  "17": { x: 54, y: 25 }, // package holiday (Poster)
-  "18": { x: 62, y: 25 }, // ruinous (Poster)
-  "19": { x: 55, y: 82 }, // self-guided (Suitcase)
-  "20": { x: 78, y: 62 }, // shopping tourism (Shopping bags)
-  "21": { x: 85, y: 48 }, // smooth (Text on bus)
-  "22": { x: 28, y: 88 }, // wander (Walking feet)
-  "23": { x: 72, y: 72 }, // world-famous (Bag brand)
-  "24": { x: 15, y: 75 }  // work out (Boy on bench)
-};
-
-const ImageArea: React.FC<ImageAreaProps> = ({ currentHint, onGuess, gameState }) => {
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
+const ImageArea: React.FC<ImageAreaProps> = ({ 
+  vocabData,
+  imageSrc, 
+  positions, 
+  onUpdatePositions, 
+  currentHint, 
+  onGuess, 
+  gameState 
+}) => {
   const [zoom, setZoom] = useState<number>(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
-  // Keypad Overlay State
-  const [positions, setPositions] = useState<Record<string, ButtonPosition>>({});
+  const [isScanning, setIsScanning] = useState(false);
   const [isEditingLayout, setIsEditingLayout] = useState(false);
   const [draggingBtnId, setDraggingBtnId] = useState<string | null>(null);
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize Default Positions (Grid fallback)
-  const initGridPositions = () => {
-    const newPositions: Record<string, ButtonPosition> = {};
-    const cols = 8;
-    const rows = 3;
-    const xStep = 100 / (cols + 1);
-    const yStep = 100 / (rows + 1);
-    
-    for (let i = 1; i <= 24; i++) {
-       const col = (i - 1) % cols;
-       const row = Math.floor((i - 1) / cols);
-       newPositions[i.toString()] = {
-         x: xStep * (col + 1),
-         y: yStep * (row + 1)
-       };
-    }
-    return newPositions;
-  };
-
-  // Load image and positions from localStorage on mount
-  useEffect(() => {
+  const handleAutoAlign = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!imageSrc) return;
+    setIsScanning(true);
     try {
-      const savedImg = localStorage.getItem('travelGameImage');
-      if (savedImg) setImageSrc(savedImg);
-
-      const savedPos = localStorage.getItem('travelGameButtonPositions');
-      if (savedPos) {
-        setPositions(JSON.parse(savedPos));
-      } else {
-        // Use SCENE_POSITIONS by default if no local save exists
-        setPositions(SCENE_POSITIONS);
-      }
-    } catch (e) {
-      console.error("Failed to load from storage", e);
-      setPositions(SCENE_POSITIONS);
+      const count = Object.keys(vocabData).length;
+      const newPositions = await detectNumberPositions(imageSrc, count);
+      onUpdatePositions(newPositions);
+    } catch (error) {
+      alert("AI không thể quét lúc này. Vui lòng thử lại hoặc xếp thủ công.");
+    } finally {
+      setIsScanning(false);
     }
-  }, []);
-
-  const savePositions = (newPos: Record<string, ButtonPosition>) => {
-    setPositions(newPos);
-    localStorage.setItem('travelGameButtonPositions', JSON.stringify(newPos));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        setImageSrc(result);
-        setZoom(1);
-        setOffset({ x: 0, y: 0 });
-        try {
-          localStorage.setItem('travelGameImage', result);
-        } catch (e) {
-          console.warn("Image too large to save to localStorage");
-        }
+  const handleGridAlign = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const count = Object.keys(vocabData).length || 24;
+    const cols = 6;
+    const rows = Math.ceil(count / cols);
+    const newPos: Record<string, {x: number, y: number}> = {};
+    
+    for (let i = 0; i < count; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const id = (i + 1).toString();
+      
+      const xStep = cols > 1 ? 80 / (cols - 1) : 0;
+      const yStep = rows > 1 ? 70 / (rows - 1) : 0;
+
+      newPos[id] = { 
+        x: 10 + (col * xStep), 
+        y: 15 + (row * yStep) 
       };
-      reader.readAsDataURL(file);
     }
-  };
-
-  const handleClearImage = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm("Remove the current image?")) {
-      setImageSrc(null);
-      localStorage.removeItem('travelGameImage');
-    }
-  };
-
-  const handleResetLayout = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm("Reset button positions to default scene layout?")) {
-      savePositions(SCENE_POSITIONS);
-    }
-  };
-
-  const handlePlaceholderClick = () => {
-    fileInputRef.current?.click();
+    onUpdatePositions(newPos);
+    setIsEditingLayout(true);
   };
 
   const toggleZoom = () => {
-    if (isEditingLayout) return; // Disable zoom while editing layout
+    if (isEditingLayout || isScanning) return; 
     setZoom(prev => {
       const newZoom = prev === 1 ? 2.5 : 1;
       if (newZoom === 1) setOffset({ x: 0, y: 0 });
@@ -149,9 +86,8 @@ const ImageArea: React.FC<ImageAreaProps> = ({ currentHint, onGuess, gameState }
     });
   };
 
-  // --- Image Drag Logic ---
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (isEditingLayout) return; // Don't drag image in edit mode
+    if (isEditingLayout || isScanning) return; 
     if (zoom > 1) {
       setIsDraggingImage(true);
       setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
@@ -159,275 +95,200 @@ const ImageArea: React.FC<ImageAreaProps> = ({ currentHint, onGuess, gameState }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Image Dragging
     if (isDraggingImage && zoom > 1) {
       e.preventDefault();
-      setOffset({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
-      });
+      setOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
       return;
     }
-    
-    // Button Dragging
     if (isEditingLayout && draggingBtnId && containerRef.current) {
         e.preventDefault();
         const rect = containerRef.current.getBoundingClientRect();
-        
-        const relX = e.clientX - rect.left;
-        const relY = e.clientY - rect.top;
-        
-        // Clamp to 0-100
-        const perX = Math.max(0, Math.min(100, (relX / rect.width) * 100));
-        const perY = Math.max(0, Math.min(100, (relY / rect.height) * 100));
-        
-        setPositions(prev => ({
-            ...prev,
-            [draggingBtnId]: { x: perX, y: perY }
-        }));
+        const perX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+        const perY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+        onUpdatePositions({ ...positions, [draggingBtnId]: { x: perX, y: perY } });
     }
   };
 
   const handleMouseUp = () => {
-    if (draggingBtnId) {
-        savePositions(positions); // Save on release
-    }
     setIsDraggingImage(false);
     setDraggingBtnId(null);
   };
 
-  const handleMouseLeave = () => {
-    if (draggingBtnId) savePositions(positions);
-    setIsDraggingImage(false);
-    setDraggingBtnId(null);
-  };
-
-  // --- Touch Logic ---
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (isEditingLayout) return;
-    if (zoom > 1) {
-      setIsDraggingImage(true);
-      setDragStart({ x: e.touches[0].clientX - offset.x, y: e.touches[0].clientY - offset.y });
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (isDraggingImage && zoom > 1) {
-      setOffset({
-        x: e.touches[0].clientX - dragStart.x,
-        y: e.touches[0].clientY - dragStart.y
-      });
-    }
-  };
-
-  // --- Button Drag Start ---
-  const handleButtonMouseDown = (e: React.MouseEvent, id: string) => {
-     if (isEditingLayout) {
-         e.stopPropagation(); // Prevent image drag start
-         setDraggingBtnId(id);
-     }
-  };
+  if (!imageSrc) return null;
 
   return (
-    <div className="relative w-full aspect-[16/9] md:aspect-[2/1] bg-slate-900 rounded-xl overflow-hidden border-2 border-slate-300 shadow-inner group select-none">
-      {imageSrc ? (
+    <div className="w-full select-none">
+      <div className="relative w-full aspect-[16/9] md:aspect-[2/1] bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-700 shadow-2xl group z-10 ring-1 ring-white/10">
         <div 
           className={`w-full h-full flex items-center justify-center overflow-hidden 
-            ${isEditingLayout ? 'cursor-crosshair' : (zoom > 1 ? 'cursor-move touch-none' : 'cursor-zoom-in')}`}
+            ${isScanning ? 'cursor-wait' : isEditingLayout ? 'cursor-crosshair' : (zoom > 1 ? 'cursor-move touch-none' : 'cursor-zoom-in')}`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={() => setIsDraggingImage(false)}
-          onClick={(e) => {
-            if (!isDraggingImage && !isEditingLayout) {
-               // Click on background logic if needed
+          onMouseLeave={handleMouseUp}
+          onTouchStart={(e) => {
+            if (isEditingLayout || isScanning) return;
+            if (zoom > 1) {
+              setIsDraggingImage(true);
+              setDragStart({ x: e.touches[0].clientX - offset.x, y: e.touches[0].clientY - offset.y });
             }
           }}
+          onTouchMove={(e) => {
+            if (isDraggingImage && zoom > 1) {
+              setOffset({ x: e.touches[0].clientX - dragStart.x, y: e.touches[0].clientY - dragStart.y });
+            }
+          }}
+          onTouchEnd={() => setIsDraggingImage(false)}
         >
-          {/* Transform Container: Holds Image AND Buttons */}
+          {isScanning && (
+            <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center text-white">
+              <div className="w-16 h-16 border-4 border-yellow-500/30 border-t-yellow-400 rounded-full animate-spin"></div>
+              <p className="mt-4 font-black uppercase tracking-widest animate-pulse text-yellow-400">Scanning...</p>
+            </div>
+          )}
+
           <div 
             ref={containerRef}
-            className="relative transition-transform duration-200 ease-out will-change-transform"
+            className={`relative transition-transform duration-200 ease-out will-change-transform ${isScanning ? 'blur-md' : ''}`}
             style={{ 
                transform: `scale(${isEditingLayout ? 1 : zoom}) translate(${isEditingLayout ? 0 : offset.x / zoom}px, ${isEditingLayout ? 0 : offset.y / zoom}px)`,
-               width: zoom === 1 ? '100%' : 'auto', 
-               height: zoom === 1 ? '100%' : 'auto',
-               display: 'flex',
-               justifyContent: 'center',
-               alignItems: 'center'
+               width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center'
             }}
           >
-              <img 
-                src={imageSrc} 
-                alt="Game Board" 
-                className="max-w-none pointer-events-none"
-                style={{ 
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  objectFit: 'contain'
-                }}
-                draggable={false}
-              />
+            <img src={imageSrc} alt="Game Board" className="max-w-full max-h-full object-contain pointer-events-none" draggable={false} />
+            
+            {Object.keys(positions).map(key => {
+              const pos = positions[key];
+              const isCorrect = gameState.correctId === key;
+              const isWrong = gameState.wrongId === key;
+              const isHint = gameState.hintId === key;
+              const isPractice = gameState.status === 'practice';
+              const revealAll = gameState.status === 'level_complete' || gameState.status === 'game_complete' || gameState.status === 'game_over' || (isPractice && lastClickedId === key);
+              const vocab = vocabData[key];
               
-              {/* Overlay Buttons */}
-              {Object.keys(positions).map(key => {
-                  const pos = positions[key];
-                  const isCorrect = gameState.correctId === key;
-                  const isHint = gameState.hintId === key;
-                  const revealAll = gameState.status === 'level_complete' || gameState.status === 'game_complete';
-                  
-                  // Style Logic
-                  let btnClass = "absolute flex items-center justify-center rounded-full text-xs font-bold shadow-md transition-all duration-200 ";
-                  
-                  // Base State
-                  if (isCorrect || (revealAll && isCorrect)) { 
-                      btnClass += "bg-green-500 text-white border-2 border-green-300 z-20 scale-125 ";
-                  } else if (isHint) {
-                      btnClass += "bg-orange-500 text-white border-2 border-orange-300 z-20 animate-bounce ";
-                  } else if (revealAll) {
-                      btnClass += "bg-white/90 text-slate-800 border border-slate-300 ";
-                  } else {
-                      btnClass += "bg-white/80 text-slate-700 border border-slate-200 hover:bg-white hover:scale-110 hover:text-indigo-600 hover:border-indigo-400 ";
-                  }
+              let btnClass = "absolute flex items-center justify-center rounded-full text-[10px] sm:text-xs font-bold shadow-lg transition-all duration-300 backdrop-blur-sm ";
+              
+              if (isCorrect) {
+                btnClass += "bg-emerald-500 text-black border-2 border-white z-20 scale-125 shadow-[0_0_15px_rgba(16,185,129,0.8)] animate-pop ";
+              } else if (isWrong) {
+                btnClass += "bg-red-500 text-white border-2 border-red-300 z-20 animate-[shake_0.5s_ease-in-out] shadow-[0_0_15px_rgba(239,68,68,0.8)] ";
+              } else if (isHint) {
+                btnClass += "bg-yellow-400 text-black border-2 border-white z-20 animate-bounce shadow-[0_0_15px_rgba(250,204,21,0.8)] ";
+              } else if (isPractice && lastClickedId === key) {
+                btnClass += "bg-blue-400 text-black border-2 border-white z-20 scale-110 shadow-[0_0_10px_rgba(96,165,250,0.6)] ";
+              } else {
+                btnClass += "bg-neutral-900/80 text-neutral-300 border border-neutral-600 hover:bg-yellow-400 hover:text-black hover:border-yellow-200 hover:scale-110 ";
+              }
 
-                  if (isEditingLayout) {
-                      btnClass += "cursor-grab active:cursor-grabbing border-dashed border-slate-500 bg-yellow-100 text-slate-900 ";
-                      if (draggingBtnId === key) btnClass += "scale-110 z-50 ";
-                  } else if (gameState.disabled && !revealAll && !isCorrect) {
-                      btnClass += "opacity-50 cursor-not-allowed ";
-                  } else {
-                      btnClass += "cursor-pointer ";
-                  }
+              if (isEditingLayout) {
+                btnClass += "cursor-grab active:cursor-grabbing border-dashed border-yellow-400 bg-yellow-400/20 text-yellow-200 ";
+                if (draggingBtnId === key) btnClass += "scale-150 z-50 ring-4 ring-yellow-400/30 ";
+              } else btnClass += "cursor-pointer ";
 
-                  return (
-                      <div
-                        key={key}
-                        onMouseDown={(e) => handleButtonMouseDown(e, key)}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (!isEditingLayout && !gameState.disabled) {
-                                onGuess(key);
-                            }
-                        }}
-                        className={btnClass}
-                        style={{
-                            left: `${pos.x}%`,
-                            top: `${pos.y}%`,
-                            width: '28px',
-                            height: '28px',
-                            transform: `translate(-50%, -50%)`, 
-                        }}
-                      >
-                          {key}
-                      </div>
-                  );
-              })}
-          </div>
-
-          {/* Controls Overlay */}
-          <div className="absolute top-4 right-4 flex gap-2 z-30">
-             {/* Edit Layout Toggle */}
-             <button
-                onClick={(e) => { 
-                    e.stopPropagation(); 
-                    if (!isEditingLayout) {
-                        setZoom(1); 
-                        setOffset({x:0, y:0});
+              return (
+                <div
+                  key={key}
+                  onMouseDown={(e) => isEditingLayout && (e.stopPropagation(), setDraggingBtnId(key))}
+                  onClick={(e) => {
+                    if (!isEditingLayout && !isScanning) {
+                      if (isPractice) setLastClickedId(key);
+                      onGuess(key);
                     }
-                    setIsEditingLayout(!isEditingLayout); 
-                }}
-                className={`p-2 rounded-lg shadow-lg backdrop-blur-sm transition-all border
-                    ${isEditingLayout ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-white/90 hover:bg-white text-slate-800 border-transparent'}`}
-                title={isEditingLayout ? "Save Layout" : "Move Buttons"}
-             >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-             </button>
-             
-             {/* Reset Layout */}
-             {isEditingLayout && (
-                 <button
-                    onClick={handleResetLayout}
-                    className="bg-red-500/90 hover:bg-red-600 text-white p-2 rounded-lg shadow-lg backdrop-blur-sm transition-all"
-                    title="Reset to Scene Layout"
-                 >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                 </button>
-             )}
+                  }}
+                  className={btnClass}
+                  style={{ left: `${pos.x}%`, top: `${pos.y}%`, width: '28px', height: '28px', transform: `translate(-50%, -50%)` }}
+                >
+                  {key}
+                  {revealAll && vocab && (
+                    <div className={`absolute top-full mt-1.5 px-3 py-1 bg-black/90 text-[10px] rounded-lg whitespace-nowrap shadow-xl border font-bold z-50 backdrop-blur-md ${isPractice ? 'text-blue-300 border-blue-500/30' : gameState.status === 'game_over' ? 'text-red-300 border-red-500/30' : 'text-emerald-300 border-emerald-500/30'}`}>
+                      {vocab.word}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-             {/* Zoom Toggle */}
-             {!isEditingLayout && (
-                 <button
-                   onClick={(e) => { e.stopPropagation(); toggleZoom(); }}
-                   className="bg-white/90 hover:bg-white text-slate-800 p-2 rounded-lg shadow-lg backdrop-blur-sm transition-all"
-                   title={zoom === 1 ? "Zoom In" : "Zoom Out"}
-                 >
-                   {zoom === 1 ? (
-                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
-                   ) : (
-                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" /></svg>
-                   )}
-                 </button>
-             )}
+        {currentHint && zoom === 1 && !isEditingLayout && (
+          <div className="absolute bottom-4 left-4 right-4 bg-black/80 backdrop-blur-xl p-3 text-slate-200 text-sm text-center border border-yellow-500/30 rounded-xl z-20 animate-fade-in-up shadow-2xl flex items-center justify-center gap-3">
+            <span className="inline-block px-2 py-0.5 bg-yellow-400 text-black rounded font-black text-[10px] uppercase tracking-wider">Hint</span> 
+            <span>{currentHint}</span>
+          </div>
+        )}
+      </div>
 
-             {/* Clear Image */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-4 px-1">
+         <div className="text-xs font-bold text-neutral-500 flex-1 min-w-[120px]">
+            {isEditingLayout ? (
+                <span className="text-yellow-400 flex items-center gap-2 bg-yellow-400/10 px-3 py-1.5 rounded-lg border border-yellow-400/20 w-fit animate-pulse">
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                   Kéo số để sửa vị trí
+                </span>
+            ) : (
+                <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Tools</span>
+            )}
+         </div>
+
+         <div className="flex gap-2 overflow-x-auto pb-1">
              <button 
-                onClick={handleClearImage}
-                className="bg-black/50 hover:bg-black/70 text-white p-2 rounded-lg backdrop-blur-sm transition-all"
-                title="Change Image"
+               onClick={handleAutoAlign} 
+               disabled={isScanning} 
+               className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-blue-400 bg-blue-950/30 hover:bg-blue-900/50 rounded-lg transition-all border border-blue-500/20 hover:border-blue-400/50 shadow-sm whitespace-nowrap"
+               title="Dùng AI quét lại vị trí các số"
              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+               AI Quét
              </button>
-          </div>
 
-          {/* Zoom Hint */}
-          {zoom === 1 && !isEditingLayout && (
-             <div className="absolute bottom-4 right-4 bg-black/50 text-white text-xs px-2 py-1 rounded-md pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-10">
-               Click to Zoom
-             </div>
-          )}
-          
-          {/* Edit Mode Hint */}
-          {isEditingLayout && (
-             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-yellow-400 text-black text-xs font-bold px-3 py-1 rounded-full shadow-lg z-40 animate-pulse">
-               EDIT MODE: Drag buttons to match image
-             </div>
-          )}
-        </div>
-      ) : (
-        <div 
-          onClick={handlePlaceholderClick}
-          className="w-full h-full flex flex-col items-center justify-center cursor-pointer bg-slate-100 hover:bg-slate-200 transition-colors p-6 text-center border-dashed border-2 border-slate-300"
-        >
-          <div className="bg-white p-4 rounded-full shadow-sm mb-3">
-            <svg className="w-10 h-10 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <p className="text-slate-800 font-bold text-lg">Upload "Airport Vocabulary" Image</p>
-          <p className="text-slate-500 text-sm mt-1">Please upload the image to set up your game board.</p>
-          <button className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium shadow-sm hover:bg-indigo-700">
-            Select Image
-          </button>
-        </div>
-      )}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept="image/*" 
-        className="hidden" 
-      />
-      
-      {/* Floating Hint Overlay - Only visible when NOT zooming or at bottom */}
-      {imageSrc && currentHint && zoom === 1 && !isEditingLayout && (
-        <div className="absolute bottom-0 left-0 right-0 bg-black/70 backdrop-blur-md p-3 text-white text-sm text-center border-t border-white/10 z-10 animate-fade-in">
-          <span className="font-bold text-yellow-400 mr-2">HINT:</span> 
-          {currentHint}
-        </div>
-      )}
+             <button 
+               onClick={handleGridAlign}
+               className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-all border border-neutral-700 hover:border-neutral-500 shadow-sm whitespace-nowrap"
+               title="Sắp xếp các số theo dạng lưới"
+             >
+               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+               Lưới
+             </button>
+
+             <button 
+               onClick={(e) => {
+                 e.stopPropagation();
+                 if (!isEditingLayout) {
+                   setZoom(1);
+                   setOffset({x:0, y:0});
+                 }
+                 setIsEditingLayout(!isEditingLayout);
+               }}
+               className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all border shadow-sm whitespace-nowrap ${
+                 isEditingLayout 
+                   ? 'bg-yellow-400 text-black border-yellow-500 shadow-[0_0_10px_rgba(250,204,21,0.4)]' 
+                   : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border-neutral-700'
+               }`}
+               title="Kéo thả thủ công các số"
+             >
+               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+               Sửa
+             </button>
+
+             <button 
+               onClick={toggleZoom}
+               className={`flex items-center gap-2 px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-all border border-neutral-700 shadow-sm whitespace-nowrap ${zoom > 1 ? 'bg-blue-950 text-blue-400 border-blue-800' : ''}`}
+               title="Phóng to để nhìn rõ hơn"
+             >
+               {zoom === 1 ? (
+                 <>
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
+                   Zoom
+                 </>
+               ) : (
+                 <>
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" /></svg>
+                   Reset
+                 </>
+               )}
+             </button>
+         </div>
+      </div>
     </div>
   );
 };

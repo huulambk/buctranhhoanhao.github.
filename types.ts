@@ -13,11 +13,15 @@ export enum GameLevel {
   IPAToNumber = 3,
 }
 
+export type DifficultyLevel = 'easy' | 'medium' | 'hard';
+
 export interface GameState {
   level: GameLevel;
   streak: number;
-  currentQuestionId: string | null; // The key (number) of the current word
+  lives: number; 
+  currentQuestionId: string | null; 
+  wrongId: string | null; 
   score: number;
   message: string;
-  status: 'idle' | 'playing' | 'paused' | 'correct' | 'incorrect' | 'level_complete' | 'game_complete';
+  status: 'idle' | 'playing' | 'paused' | 'correct' | 'incorrect' | 'level_complete' | 'game_complete' | 'game_over' | 'practice';
 }
